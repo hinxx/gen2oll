@@ -1,8 +1,6 @@
 #ifndef LAUNCHER_H
 #define LAUNCHER_H
 
-//#include "console.h"
-
 #include "imgui.h"
 
 #include <unistd.h>
@@ -18,18 +16,22 @@ struct Ioc {
     bool started;
     bool wantStart;
     bool wantStop;
-    int toChild;
-    int fromChild;
+    int childStdin;
+    int childStdout;
+    int childStderr;
     pid_t pid;
     char sendBuffer[256];
-    char recvBuffer[4096];
-    size_t recvSize;
-    off_t recvOffset;
+    char stdoutBuffer[4096];
+    size_t stdoutSize;
+    size_t stdoutLines;
+    ImGuiTextBuffer stdoutLinesBuffer;
+    char stderrBuffer[4096];
+    size_t stderrSize;
+    size_t stderrLines;
+    ImGuiTextBuffer stderrLinesBuffer;
     bool open;
-    ImGuiTextBuffer textBuf;
     bool autoScroll;
     bool scrollToBottom;
-    size_t lines;
 
     Ioc(const char * _stagePath, const char * _instanceName, const char * _deviceName, const char * _prefix) {
         stagePath = strdup(_stagePath);
@@ -39,17 +41,20 @@ struct Ioc {
         started = false;
         wantStart = false;
         wantStop = false;
-        toChild = -1;
-        fromChild = -1;
+        childStdin = -1;
+        childStdout = -1;
+        childStderr = -1;
         pid = 0;
         sendBuffer[0] = 0;
-        recvBuffer[0] = 0;
-        recvSize = 0;
-        recvOffset = 0;
+        stdoutBuffer[0] = 0;
+        stdoutSize = 0;
+        stderrBuffer[0] = 0;
+        stderrSize = 0;
         autoScroll = true;
         scrollToBottom = false;
-        clearBuffer();
         open = false;
+        clearStdoutBuffer();
+        clearStderrBuffer();
     }
     ~Ioc() {
         if (stagePath) { free(stagePath); }
@@ -64,16 +69,27 @@ struct Ioc {
     int stop();
     int sendCommand(const char * _command);
     int recvResponse(void);
-    void extractLines(void);
+    void extractLinesStdout();
+    void extractLinesStderr();
 
-    void clearBuffer(void) {
-        lines = 0;
-        textBuf.clear();
+    void clearStdoutBuffer(void) {
+        stdoutLines = 0;
+        stdoutLinesBuffer.clear();
     }
 
-    void addLine(const char * _line) {
-        textBuf.appendf("%s", _line);
-        lines++;
+    void addStdoutLine(const char * _line) {
+        stdoutLinesBuffer.appendf("%s", _line);
+        stdoutLines++;
+    }
+
+    void clearStderrBuffer(void) {
+        stderrLines = 0;
+        stderrLinesBuffer.clear();
+    }
+
+    void addStderrLine(const char * _line) {
+        stderrLinesBuffer.appendf("%s", _line);
+        stderrLines++;
     }
 
     void draw(void);

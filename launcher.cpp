@@ -219,6 +219,7 @@ void IocList::clear() {
 int Ioc::start() {
     int pipe_stdin[2];
     int pipe_stdout[2];
+    int pipe_stderr[2];
 
     fprintf(stderr, "%s:%d starting IOC %s\n", __FUNCTION__, __LINE__, deviceName);
     if (started) {
@@ -226,8 +227,9 @@ int Ioc::start() {
         return 0;
     }
     assert(pid == 0);
-    assert(toChild == -1);
-    assert(fromChild == -1);
+    assert(childStdin == -1);
+    assert(childStdout == -1);
+    assert(childStderr == -1);
 
     if (pipe(pipe_stdin)) {
         fprintf(stderr, "%s:%d pipe() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
@@ -237,8 +239,12 @@ int Ioc::start() {
         fprintf(stderr, "%s:%d pipe() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
         return -1;
     }
-    fprintf(stderr, "%s:%d IO pipe FDs pipe_stdin [0] = %d, [1] = %d | pipe_stdout [0] = %d, [1] = %d\n",
-            __FUNCTION__, __LINE__, pipe_stdin[0], pipe_stdin[1], pipe_stdout[0], pipe_stdout[1]);
+    if (pipe(pipe_stderr)) {
+        fprintf(stderr, "%s:%d pipe() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
+        return -1;
+    }
+    fprintf(stderr, "%s:%d IO pipe FDs pipe_stdin %d, %d pipe_stdout %d, %d pipe_stderr %d, %d\n",
+            __FUNCTION__, __LINE__, pipe_stdin[0], pipe_stdin[1], pipe_stdout[0], pipe_stdout[1], pipe_stderr[0], pipe_stderr[1]);
 
     pid_t p = fork();
     if (p == 0) {
@@ -247,6 +253,8 @@ int Ioc::start() {
         dup2(pipe_stdin[0], 0);
         close(pipe_stdout[0]);
         dup2(pipe_stdout[1], 1);
+        close(pipe_stderr[0]);
+        dup2(pipe_stderr[1], 2);
 
         // ask kernel to deliver SIGTERM in case the parent dies
         prctl(PR_SET_PDEATHSIG, SIGTERM);
@@ -265,11 +273,17 @@ int Ioc::start() {
     // close unused pipe ends
     close(pipe_stdin[0]);
     close(pipe_stdout[1]);
+    close(pipe_stderr[1]);
 
     // store child info for later use
     pid = p;
-    toChild = pipe_stdin[1];
-    fromChild = pipe_stdout[0];
+    childStdin = pipe_stdin[1];
+    childStdout = pipe_stdout[0];
+    childStderr = pipe_stderr[0];
+    stdoutBuffer[0] = 0;
+    stdoutSize = 0;
+    stderrBuffer[0] = 0;
+    stderrSize = 0;
     started = true;
 
     return 0;
@@ -313,10 +327,16 @@ int Ioc::stop() {
 
     started = false;
     pid = 0;
-    close(toChild);
-    toChild = -1;
-    close(fromChild);
-    fromChild = -1;
+    close(childStdin);
+    childStdin = -1;
+    close(childStdout);
+    childStdout = -1;
+    stdoutBuffer[0] = 0;
+    stdoutSize = 0;
+    close(childStderr);
+    childStderr = -1;
+    stderrBuffer[0] = 0;
+    stderrSize = 0;
 
     fprintf(stderr, "%s:%d IOC %s stopped\n", __FUNCTION__, __LINE__, deviceName);
     return 0;
@@ -327,23 +347,27 @@ int Ioc::sendCommand(const char * _command) {
     fprintf(stderr, "%s:%d new command for child [%zu]] '%s'\n",
             __FUNCTION__, __LINE__, cmdSz, _command);
 
-    write(toChild, _command, cmdSz);
-    write(toChild, "\n", 1);
+    write(childStdin, _command, cmdSz);
+    write(childStdin, "\n", 1);
 
     return 0;
 }
 
 int Ioc::recvResponse(void) {
 
-    struct pollfd fds;
-    nfds_t nfds = 1;
+    struct pollfd fds[2];
+    nfds_t nfds = 2;
     // timeout in milliseconds
-    int timeout = 1;
+    int timeout = 5;
 
-    fds.fd = fromChild;
-    fds.events = POLLIN;
-    fds.revents = 0;
-    int n = poll(&fds, nfds, timeout);
+    fds[0].fd = childStderr;
+    fds[0].events = POLLIN;
+    fds[0].revents = 0;
+    fds[1].fd = childStdout;
+    fds[1].events = POLLIN;
+    fds[1].revents = 0;
+
+    int n = poll(fds, nfds, timeout);
 //    fprintf(stderr, "%s:%d poll() returned %d, revents %d\n",
 //            __FUNCTION__, __LINE__, n, fds.revents);
 
@@ -351,13 +375,26 @@ int Ioc::recvResponse(void) {
         fprintf(stderr, "%s:%d poll() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
         return -1;
     } else if (n) {
-        fprintf(stderr, "%s:%d %d nonzero revents, recvOffset %ld ..\n", __FUNCTION__, __LINE__, n, recvOffset);
-        ssize_t nRecv = read(fromChild, recvBuffer + recvOffset, 4095);
-        recvBuffer[nRecv] = '\0';
-        recvSize = nRecv;
-        recvOffset += recvSize;
-        fprintf(stderr, "%s:%d nRecv %zd, recvSize %zu, recvOffset %ld, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
-                nRecv, recvSize, recvOffset, recvBuffer);
+        // stderr
+        if ((fds[0].revents & POLLIN)) {
+            fprintf(stderr, "%s:%d stderrSize %zu ..\n", __FUNCTION__, __LINE__, stderrSize);
+            ssize_t nRecv = read(fds[0].fd, stderrBuffer + stderrSize, 4095);
+            stderrSize += nRecv;
+            stderrBuffer[stderrSize] = '\0';
+            fprintf(stderr, "%s:%d nRecv %zd stderrSize %zu, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
+                    nRecv, stderrSize, stderrBuffer);
+            extractLinesStderr();
+        }
+        // stdout
+        if ((fds[1].revents & POLLIN)) {
+            fprintf(stderr, "%s:%d stdoutSize %zu ..\n", __FUNCTION__, __LINE__, stdoutSize);
+            ssize_t nRecv = read(fds[1].fd, stdoutBuffer + stdoutSize, 4095);
+            stdoutSize += nRecv;
+            stdoutBuffer[stdoutSize] = '\0';
+            fprintf(stderr, "%s:%d nRecv %zd stdoutSize %zu, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
+                    nRecv, stdoutSize, stdoutBuffer);
+            extractLinesStdout();
+        }
     } else {
 //        fprintf(stderr, "%s:%d timeout occured\n", __FUNCTION__, __LINE__);
 //        recvNewData = false;
@@ -366,36 +403,77 @@ int Ioc::recvResponse(void) {
     return 0;
 }
 
-void Ioc::extractLines(void) {
-    char * s;
-    char * e;
-    char * eob;
+void Ioc::extractLinesStdout() {
+    char * s = stdoutBuffer;
+    char * e = stdoutBuffer;
+    char * eob = &stdoutBuffer[stdoutSize];
     char c;
-    s = recvBuffer;
-    e = recvBuffer;
-    eob = &recvBuffer[recvSize];
     while (e < eob) {
         if (*e == '\n') {
             e++;
             c = *e;
             *e = '\0';
-            addLine(s);
+            addStdoutLine(s);
             *e = c;
             s = e;
         }
         e++;
     }
-    // XXX: fix handling of the remainder of the buffer
-    //      there is always text at the end of the buffer
-    //      NOT followed by '\n' : 'epics>'
-    recvSize = 0;
-    recvOffset = 0;
+    // handle the data residue without '\n'
+    if (eob - s) {
+        size_t rem = eob - s;
+        size_t from = s - stdoutBuffer;
+        // move to the start of the buffer and remember the size
+        memmove(&stdoutBuffer[0], &stdoutBuffer[from], rem);
+        stdoutSize = rem;
+        stdoutBuffer[stdoutSize] = '\0';
+        fprintf(stderr, "%s:%d moved %zu bytes from %zu to start, stdoutSize %ld: \n'%s'\n", __FUNCTION__, __LINE__,
+                rem, from, stdoutSize, stdoutBuffer);
+    } else {
+        // nothing left
+        stdoutSize = 0;
+        stdoutBuffer[stdoutSize] = '\0';
+    }
+}
+
+void Ioc::extractLinesStderr() {
+    char * s = stderrBuffer;
+    char * e = stderrBuffer;
+    char * eob = &stderrBuffer[stderrSize];
+    char c;
+    while (e < eob) {
+        if (*e == '\n') {
+            e++;
+            c = *e;
+            *e = '\0';
+            addStderrLine(s);
+            *e = c;
+            s = e;
+        }
+        e++;
+    }
+    // handle the data residue without '\n'
+    if (eob - s) {
+        size_t rem = eob - s;
+        size_t from = s - stderrBuffer;
+        // move to the start of the buffer and remember the size
+        memmove(&stderrBuffer[0], &stderrBuffer[from], rem);
+        stderrSize = rem;
+        stderrBuffer[stderrSize] = '\0';
+        fprintf(stderr, "%s:%d moved %zu bytes from %zu to start, stderrSize %ld: \n'%s'\n", __FUNCTION__, __LINE__,
+                rem, from, stderrSize, stderrBuffer);
+    } else {
+        // nothing left
+        stderrSize = 0;
+        stderrBuffer[stderrSize] = '\0';
+    }
 }
 
 void Ioc::draw(void) {
-    ImGui::Text("Buffer contents: %zu lines, %d bytes", lines, textBuf.size());
+    ImGui::Text("Buffer contents: %zu lines, %d bytes", stdoutLines, stdoutLinesBuffer.size());
     if (ImGui::Button("Clear")) {
-        clearBuffer();
+        clearStdoutBuffer();
+        clearStderrBuffer();
     }
 
     // show IOC status
@@ -440,21 +518,29 @@ void Ioc::draw(void) {
         ImGui::SetKeyboardFocusHere(-1);
     }
 
-    // get read out IOC shell output
+    // get IOC shell output/error
     recvResponse();
-    if (recvSize) {
-        extractLines();
-    }
 
-    // show the IOC shell output/command response
+    // show the IOC shell output response
     ImGui::Separator();
-    ImGui::BeginChild("Log");
-    ImGui::TextUnformatted(textBuf.begin(), textBuf.end());
+    ImGui::BeginChild("OutLog", ImVec2(0, -103));
+    ImGui::TextUnformatted(stdoutLinesBuffer.begin(), stdoutLinesBuffer.end());
     if (scrollToBottom || (autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())){
         ImGui::SetScrollHereY(1.0f);
     }
-    scrollToBottom = false;
     ImGui::EndChild();
+
+    // show the IOC shell error response
+    ImGui::Separator();
+    ImGui::BeginChild("ErrLog", ImVec2(0, 100));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+    ImGui::TextUnformatted(stderrLinesBuffer.begin(), stderrLinesBuffer.end());
+    if (scrollToBottom || (autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())){
+        ImGui::SetScrollHereY(1.0f);
+    }
+    ImGui::PopStyleColor();
+    ImGui::EndChild();
+    scrollToBottom = false;
 }
 
 void Ioc::show(bool * _open) {
