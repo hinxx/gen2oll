@@ -8,6 +8,37 @@
 #include <stdlib.h>
 #include <vector>
 
+struct ChildData {
+    int fd;
+    char buffer[4096];
+    size_t size;
+    size_t lines;
+    ImGuiTextBuffer linesBuffer;
+    bool autoScroll;
+    bool scrollToBottom;
+
+    ChildData() {
+        fd = -1;
+        autoScroll = true;
+        scrollToBottom = false;
+        clear();
+    }
+
+    void clear(void) {
+        buffer[0] = '\0';
+        size = 0;
+        lines = 0;
+        linesBuffer.clear();
+    }
+
+    void addLine(const char * _line) {
+        linesBuffer.appendf("%s", _line);
+        lines++;
+    }
+
+    void extractLines(void);
+};
+
 struct Ioc {
     char * stagePath;
     char * instanceName;
@@ -16,22 +47,12 @@ struct Ioc {
     bool started;
     bool wantStart;
     bool wantStop;
-    int childStdin;
-    int childStdout;
-    int childStderr;
     pid_t pid;
-    char sendBuffer[256];
-    char stdoutBuffer[4096];
-    size_t stdoutSize;
-    size_t stdoutLines;
-    ImGuiTextBuffer stdoutLinesBuffer;
-    char stderrBuffer[4096];
-    size_t stderrSize;
-    size_t stderrLines;
-    ImGuiTextBuffer stderrLinesBuffer;
+    int childStdin;
+    char stdinBuffer[256];
+    ChildData childStdout;
+    ChildData childStderr;
     bool open;
-    bool autoScroll;
-    bool scrollToBottom;
 
     Ioc(const char * _stagePath, const char * _instanceName, const char * _deviceName, const char * _prefix) {
         stagePath = strdup(_stagePath);
@@ -41,20 +62,12 @@ struct Ioc {
         started = false;
         wantStart = false;
         wantStop = false;
-        childStdin = -1;
-        childStdout = -1;
-        childStderr = -1;
         pid = 0;
-        sendBuffer[0] = 0;
-        stdoutBuffer[0] = 0;
-        stdoutSize = 0;
-        stderrBuffer[0] = 0;
-        stderrSize = 0;
-        autoScroll = true;
-        scrollToBottom = false;
+        childStdin = -1;
+        stdinBuffer[0] = 0;
+        childStdout.clear();
+        childStderr.clear();
         open = false;
-        clearStdoutBuffer();
-        clearStderrBuffer();
     }
     ~Ioc() {
         if (stagePath) { free(stagePath); }
@@ -69,29 +82,6 @@ struct Ioc {
     int stop();
     int sendCommand(const char * _command);
     int recvResponse(void);
-    void extractLinesStdout();
-    void extractLinesStderr();
-
-    void clearStdoutBuffer(void) {
-        stdoutLines = 0;
-        stdoutLinesBuffer.clear();
-    }
-
-    void addStdoutLine(const char * _line) {
-        stdoutLinesBuffer.appendf("%s", _line);
-        stdoutLines++;
-    }
-
-    void clearStderrBuffer(void) {
-        stderrLines = 0;
-        stderrLinesBuffer.clear();
-    }
-
-    void addStderrLine(const char * _line) {
-        stderrLinesBuffer.appendf("%s", _line);
-        stderrLines++;
-    }
-
     void draw(void);
     void show(bool * _open);
 };

@@ -224,7 +224,7 @@ int main(int, char**)
                     Ioc * ioc = iocs->ioc(n);
                     ImGui::Text("%s", ioc->deviceName); ImGui::NextColumn();
                     ImGui::Text("%s", ioc->prefix); ImGui::NextColumn();
-                    ImGui::Text("%d", ioc->started); ImGui::NextColumn();
+                    ImGui::Text("%s", ioc->started ? "YES" : "NO"); ImGui::NextColumn();
                     if (ImGui::Button("Open")) {
                         ioc->open = true;
                     }
@@ -255,7 +255,6 @@ int main(int, char**)
 
     fprintf(stderr, "out of loop, have %lu IOCs!\n", iocs->count());
     delete iocs;
-//    delete iocui0;
 
     // Cleanup
     ImGui_ImplOpenGL3_Shutdown();

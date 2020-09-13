@@ -213,6 +213,40 @@ void IocList::clear() {
 
 
 
+void ChildData::extractLines(void) {
+    char * s = buffer;
+    char * e = buffer;
+    char * eob = &buffer[size];
+    char c;
+    while (e < eob) {
+        if (*e == '\n') {
+            e++;
+            c = *e;
+            *e = '\0';
+            addLine(s);
+            *e = c;
+            s = e;
+        }
+        e++;
+    }
+    // handle the data residue without '\n'
+    if (eob - s) {
+        size_t rem = eob - s;
+        size_t from = s - buffer;
+        // move to the start of the buffer and remember the size
+        memmove(&buffer[0], &buffer[from], rem);
+        size = rem;
+        buffer[size] = '\0';
+        fprintf(stderr, "%s:%d moved %zu bytes from %zu to start, stdoutSize %ld: \n'%s'\n", __FUNCTION__, __LINE__,
+                rem, from, size, buffer);
+    } else {
+        // nothing left
+        size = 0;
+        buffer[size] = '\0';
+    }
+}
+
+
 
 
 
@@ -228,8 +262,8 @@ int Ioc::start() {
     }
     assert(pid == 0);
     assert(childStdin == -1);
-    assert(childStdout == -1);
-    assert(childStderr == -1);
+    assert(childStdout.fd == -1);
+    assert(childStderr.fd == -1);
 
     if (pipe(pipe_stdin)) {
         fprintf(stderr, "%s:%d pipe() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
@@ -278,12 +312,10 @@ int Ioc::start() {
     // store child info for later use
     pid = p;
     childStdin = pipe_stdin[1];
-    childStdout = pipe_stdout[0];
-    childStderr = pipe_stderr[0];
-    stdoutBuffer[0] = 0;
-    stdoutSize = 0;
-    stderrBuffer[0] = 0;
-    stderrSize = 0;
+    childStdout.fd = pipe_stdout[0];
+    childStdout.clear();
+    childStderr.fd = pipe_stderr[0];
+    childStderr.clear();
     started = true;
 
     return 0;
@@ -329,14 +361,12 @@ int Ioc::stop() {
     pid = 0;
     close(childStdin);
     childStdin = -1;
-    close(childStdout);
-    childStdout = -1;
-    stdoutBuffer[0] = 0;
-    stdoutSize = 0;
-    close(childStderr);
-    childStderr = -1;
-    stderrBuffer[0] = 0;
-    stderrSize = 0;
+    close(childStdout.fd);
+    childStdout.fd = -1;
+    childStdout.clear();
+    close(childStderr.fd);
+    childStderr.fd = -1;
+    childStderr.clear();
 
     fprintf(stderr, "%s:%d IOC %s stopped\n", __FUNCTION__, __LINE__, deviceName);
     return 0;
@@ -360,10 +390,10 @@ int Ioc::recvResponse(void) {
     // timeout in milliseconds
     int timeout = 5;
 
-    fds[0].fd = childStderr;
+    fds[0].fd = childStderr.fd;
     fds[0].events = POLLIN;
     fds[0].revents = 0;
-    fds[1].fd = childStdout;
+    fds[1].fd = childStdout.fd;
     fds[1].events = POLLIN;
     fds[1].revents = 0;
 
@@ -377,23 +407,23 @@ int Ioc::recvResponse(void) {
     } else if (n) {
         // stderr
         if ((fds[0].revents & POLLIN)) {
-            fprintf(stderr, "%s:%d stderrSize %zu ..\n", __FUNCTION__, __LINE__, stderrSize);
-            ssize_t nRecv = read(fds[0].fd, stderrBuffer + stderrSize, 4095);
-            stderrSize += nRecv;
-            stderrBuffer[stderrSize] = '\0';
-            fprintf(stderr, "%s:%d nRecv %zd stderrSize %zu, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
-                    nRecv, stderrSize, stderrBuffer);
-            extractLinesStderr();
+            fprintf(stderr, "%s:%d childStderr.size %zu ..\n", __FUNCTION__, __LINE__, childStderr.size);
+            ssize_t nRecv = read(fds[0].fd, childStderr.buffer + childStderr.size, 4095);
+            childStderr.size += nRecv;
+            childStderr.buffer[childStderr.size] = '\0';
+            fprintf(stderr, "%s:%d nRecv %zd childStderr.size %zu, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
+                    nRecv, childStderr.size, childStderr.buffer);
+            childStderr.extractLines();
         }
         // stdout
         if ((fds[1].revents & POLLIN)) {
-            fprintf(stderr, "%s:%d stdoutSize %zu ..\n", __FUNCTION__, __LINE__, stdoutSize);
-            ssize_t nRecv = read(fds[1].fd, stdoutBuffer + stdoutSize, 4095);
-            stdoutSize += nRecv;
-            stdoutBuffer[stdoutSize] = '\0';
+            fprintf(stderr, "%s:%d childStdout.size %zu ..\n", __FUNCTION__, __LINE__, childStdout.size);
+            ssize_t nRecv = read(fds[1].fd, childStdout.buffer + childStdout.size, 4095);
+            childStdout.size += nRecv;
+            childStdout.buffer[childStdout.size] = '\0';
             fprintf(stderr, "%s:%d nRecv %zd stdoutSize %zu, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
-                    nRecv, stdoutSize, stdoutBuffer);
-            extractLinesStdout();
+                    nRecv, childStdout.size, childStdout.buffer);
+            childStdout.extractLines();
         }
     } else {
 //        fprintf(stderr, "%s:%d timeout occured\n", __FUNCTION__, __LINE__);
@@ -403,79 +433,7 @@ int Ioc::recvResponse(void) {
     return 0;
 }
 
-void Ioc::extractLinesStdout() {
-    char * s = stdoutBuffer;
-    char * e = stdoutBuffer;
-    char * eob = &stdoutBuffer[stdoutSize];
-    char c;
-    while (e < eob) {
-        if (*e == '\n') {
-            e++;
-            c = *e;
-            *e = '\0';
-            addStdoutLine(s);
-            *e = c;
-            s = e;
-        }
-        e++;
-    }
-    // handle the data residue without '\n'
-    if (eob - s) {
-        size_t rem = eob - s;
-        size_t from = s - stdoutBuffer;
-        // move to the start of the buffer and remember the size
-        memmove(&stdoutBuffer[0], &stdoutBuffer[from], rem);
-        stdoutSize = rem;
-        stdoutBuffer[stdoutSize] = '\0';
-        fprintf(stderr, "%s:%d moved %zu bytes from %zu to start, stdoutSize %ld: \n'%s'\n", __FUNCTION__, __LINE__,
-                rem, from, stdoutSize, stdoutBuffer);
-    } else {
-        // nothing left
-        stdoutSize = 0;
-        stdoutBuffer[stdoutSize] = '\0';
-    }
-}
-
-void Ioc::extractLinesStderr() {
-    char * s = stderrBuffer;
-    char * e = stderrBuffer;
-    char * eob = &stderrBuffer[stderrSize];
-    char c;
-    while (e < eob) {
-        if (*e == '\n') {
-            e++;
-            c = *e;
-            *e = '\0';
-            addStderrLine(s);
-            *e = c;
-            s = e;
-        }
-        e++;
-    }
-    // handle the data residue without '\n'
-    if (eob - s) {
-        size_t rem = eob - s;
-        size_t from = s - stderrBuffer;
-        // move to the start of the buffer and remember the size
-        memmove(&stderrBuffer[0], &stderrBuffer[from], rem);
-        stderrSize = rem;
-        stderrBuffer[stderrSize] = '\0';
-        fprintf(stderr, "%s:%d moved %zu bytes from %zu to start, stderrSize %ld: \n'%s'\n", __FUNCTION__, __LINE__,
-                rem, from, stderrSize, stderrBuffer);
-    } else {
-        // nothing left
-        stderrSize = 0;
-        stderrBuffer[stderrSize] = '\0';
-    }
-}
-
 void Ioc::draw(void) {
-    ImGui::Text("Buffer contents: %zu lines, %d bytes", stdoutLines, stdoutLinesBuffer.size());
-    if (ImGui::Button("Clear")) {
-        clearStdoutBuffer();
-        clearStderrBuffer();
-    }
-
     // show IOC status
     if (started) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
@@ -496,18 +454,40 @@ void Ioc::draw(void) {
         stop();
     }
     ImGui::SameLine();
-    ImGui::Checkbox("AutoScroll", &autoScroll);
-
-    // show command input text field
+    ImGui::Text("PID %d", pid);
     ImGui::Separator();
+
+    ImGui::PushID("StdOut");
+    ImGui::Checkbox("auto scroll", &childStdout.autoScroll);
+    ImGui::SameLine();
+    if (ImGui::Button("clear")) {
+        childStdout.clear();
+    }
+    ImGui::SameLine();
+    ImGui::Text("%zu lines, %d bytes", childStdout.lines, childStdout.linesBuffer.size());
+    ImGui::PopID();
+
+    ImGui::PushID("StdErr");
+    ImGui::Checkbox("auto scroll", &childStderr.autoScroll);
+    ImGui::SameLine();
+    if (ImGui::Button("clear")) {
+        childStderr.clear();
+    }
+    ImGui::SameLine();
+    ImGui::Text("%zu lines, %d bytes", childStderr.lines, childStderr.linesBuffer.size());
+    ImGui::PopID();
+
+    ImGui::Separator();
+    // show command input text field
     bool reclaim_focus = false;
     ImGuiInputTextFlags input_text_flags = ImGuiInputTextFlags_EnterReturnsTrue;
-    if (ImGui::InputText("Input", sendBuffer, IM_ARRAYSIZE(sendBuffer), input_text_flags)) {
+    if (ImGui::InputText("Input", stdinBuffer, IM_ARRAYSIZE(stdinBuffer), input_text_flags)) {
         // send the command to the IOC shell
-        sendCommand(sendBuffer);
-        strcpy(sendBuffer, "");
+        sendCommand(stdinBuffer);
+        strcpy(stdinBuffer, "");
         // on command input, we scroll to bottom even if AutoScroll==false
-        scrollToBottom = true;
+        childStdout.scrollToBottom = true;
+        childStderr.scrollToBottom = true;
         reclaim_focus = true;
     }
 
@@ -524,23 +504,24 @@ void Ioc::draw(void) {
     // show the IOC shell output response
     ImGui::Separator();
     ImGui::BeginChild("OutLog", ImVec2(0, -103));
-    ImGui::TextUnformatted(stdoutLinesBuffer.begin(), stdoutLinesBuffer.end());
-    if (scrollToBottom || (autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())){
+    ImGui::TextUnformatted(childStdout.linesBuffer.begin(), childStdout.linesBuffer.end());
+    if (childStdout.scrollToBottom || (childStdout.autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())){
         ImGui::SetScrollHereY(1.0f);
     }
+    childStdout.scrollToBottom = false;
     ImGui::EndChild();
 
     // show the IOC shell error response
     ImGui::Separator();
     ImGui::BeginChild("ErrLog", ImVec2(0, 100));
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-    ImGui::TextUnformatted(stderrLinesBuffer.begin(), stderrLinesBuffer.end());
-    if (scrollToBottom || (autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())){
+    ImGui::TextUnformatted(childStderr.linesBuffer.begin(), childStderr.linesBuffer.end());
+    if (childStderr.scrollToBottom || (childStderr.autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())){
         ImGui::SetScrollHereY(1.0f);
     }
     ImGui::PopStyleColor();
+    childStderr.scrollToBottom = false;
     ImGui::EndChild();
-    scrollToBottom = false;
 }
 
 void Ioc::show(bool * _open) {
