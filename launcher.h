@@ -9,6 +9,7 @@
 #include <vector>
 
 struct ChildData {
+    char name[16];
     int fd;
     char buffer[4096];
     size_t size;
@@ -18,10 +19,15 @@ struct ChildData {
     bool scrollToBottom;
 
     ChildData() {
+        name[0] = '\0';
         fd = -1;
         autoScroll = true;
         scrollToBottom = false;
         clear();
+    }
+
+    void setName(const char * _name) {
+        strncpy(name, _name, 15);
     }
 
     void clear(void) {
@@ -37,6 +43,7 @@ struct ChildData {
     }
 
     void extractLines(void);
+    int recvResponse(void);
 };
 
 struct Ioc {
@@ -65,7 +72,9 @@ struct Ioc {
         pid = 0;
         childStdin = -1;
         stdinBuffer[0] = 0;
+        childStdout.setName("stdout");
         childStdout.clear();
+        childStderr.setName("stderr");
         childStderr.clear();
         open = false;
     }

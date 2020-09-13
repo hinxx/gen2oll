@@ -237,13 +237,54 @@ void ChildData::extractLines(void) {
         memmove(&buffer[0], &buffer[from], rem);
         size = rem;
         buffer[size] = '\0';
-        fprintf(stderr, "%s:%d moved %zu bytes from %zu to start, stdoutSize %ld: \n'%s'\n", __FUNCTION__, __LINE__,
-                rem, from, size, buffer);
+        fprintf(stderr, "%s:%d %s moved %zu bytes from %zu to start, size %ld: \n'%s'\n", __FUNCTION__, __LINE__,
+                name, rem, from, size, buffer);
     } else {
         // nothing left
         size = 0;
         buffer[size] = '\0';
     }
+}
+
+int ChildData::recvResponse(void) {
+    struct pollfd fds;
+    nfds_t nfds = 1;
+    // timeout in milliseconds
+    int timeout = 1;
+
+    fds.fd = fd;
+    fds.events = POLLIN;
+    fds.revents = 0;
+
+    int n = poll(&fds, nfds, timeout);
+    if (n == -1) {
+        fprintf(stderr, "%s:%d poll() %s failed %s\n", __FUNCTION__, __LINE__, name, strerror(errno));
+    } else if (n) {
+        fprintf(stderr, "%s:%d %s revents %d ..\n", __FUNCTION__, __LINE__, name, fds.revents);
+        if (fds.revents & POLLHUP) {
+            // remote end has closed the connection (exit issued?)
+            errno = EPIPE;
+            addLine("**** IOC not responding ***");
+            // return error
+            n = -1;
+        } else if (fds.revents & POLLIN) {
+            fprintf(stderr, "%s:%d %s size %zu ..\n", __FUNCTION__, __LINE__, name, size);
+            n = read(fd, buffer + size, 4095 - size);
+            size += n;
+            buffer[size] = '\0';
+            fprintf(stderr, "%s:%d %s nRecv %d size %zu, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
+                    name, n, size, buffer);
+            extractLines();
+            // return number of bytes available in buffer
+            n = size;
+        } else {
+            fprintf(stderr, "%s:%d %s UNHANDLED revents %d ..\n", __FUNCTION__, __LINE__, name, fds.revents);
+        }
+    } else {
+        // fprintf(stderr, "%s:%d timeout occured\n", __FUNCTION__, __LINE__);
+    }
+
+    return n;
 }
 
 
@@ -363,10 +404,8 @@ int Ioc::stop() {
     childStdin = -1;
     close(childStdout.fd);
     childStdout.fd = -1;
-    childStdout.clear();
     close(childStderr.fd);
     childStderr.fd = -1;
-    childStderr.clear();
 
     fprintf(stderr, "%s:%d IOC %s stopped\n", __FUNCTION__, __LINE__, deviceName);
     return 0;
@@ -385,52 +424,15 @@ int Ioc::sendCommand(const char * _command) {
 
 int Ioc::recvResponse(void) {
 
-    struct pollfd fds[2];
-    nfds_t nfds = 2;
-    // timeout in milliseconds
-    int timeout = 5;
+    int ret = 0;
 
-    fds[0].fd = childStderr.fd;
-    fds[0].events = POLLIN;
-    fds[0].revents = 0;
-    fds[1].fd = childStdout.fd;
-    fds[1].events = POLLIN;
-    fds[1].revents = 0;
-
-    int n = poll(fds, nfds, timeout);
-//    fprintf(stderr, "%s:%d poll() returned %d, revents %d\n",
-//            __FUNCTION__, __LINE__, n, fds.revents);
-
-    if (n == -1) {
-        fprintf(stderr, "%s:%d poll() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
-        return -1;
-    } else if (n) {
-        // stderr
-        if ((fds[0].revents & POLLIN)) {
-            fprintf(stderr, "%s:%d childStderr.size %zu ..\n", __FUNCTION__, __LINE__, childStderr.size);
-            ssize_t nRecv = read(fds[0].fd, childStderr.buffer + childStderr.size, 4095);
-            childStderr.size += nRecv;
-            childStderr.buffer[childStderr.size] = '\0';
-            fprintf(stderr, "%s:%d nRecv %zd childStderr.size %zu, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
-                    nRecv, childStderr.size, childStderr.buffer);
-            childStderr.extractLines();
-        }
-        // stdout
-        if ((fds[1].revents & POLLIN)) {
-            fprintf(stderr, "%s:%d childStdout.size %zu ..\n", __FUNCTION__, __LINE__, childStdout.size);
-            ssize_t nRecv = read(fds[1].fd, childStdout.buffer + childStdout.size, 4095);
-            childStdout.size += nRecv;
-            childStdout.buffer[childStdout.size] = '\0';
-            fprintf(stderr, "%s:%d nRecv %zd stdoutSize %zu, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
-                    nRecv, childStdout.size, childStdout.buffer);
-            childStdout.extractLines();
-        }
-    } else {
-//        fprintf(stderr, "%s:%d timeout occured\n", __FUNCTION__, __LINE__);
-//        recvNewData = false;
+    ret |= childStderr.recvResponse();
+    ret |= childStdout.recvResponse();
+    if (ret == -1) {
+        fprintf(stderr, "%s:%d poll()/read() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
     }
 
-    return 0;
+    return ret;
 }
 
 void Ioc::draw(void) {
@@ -498,8 +500,14 @@ void Ioc::draw(void) {
         ImGui::SetKeyboardFocusHere(-1);
     }
 
-    // get IOC shell output/error
-    recvResponse();
+    // get IOC shell output/error bytes
+    int ret = recvResponse();
+    if (ret < 0) {
+        // child has closed the pipe.. stop the communication
+        if (errno == EPIPE) {
+            stop();
+        }
+    }
 
     // show the IOC shell output response
     ImGui::Separator();
