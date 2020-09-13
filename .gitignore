@@ -1,3 +1,5 @@
 imgui.ini
 /data
 gen2oll.*
+*.o
+gen2oll

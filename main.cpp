@@ -142,7 +142,6 @@ int main(int, char**)
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
     IocList * iocs = new IocList();
-    char InputBuf[256];
 
     fprintf(stderr, "starting loop!\n");
 
@@ -211,14 +210,13 @@ int main(int, char**)
             }
 
             if (iocs->count() > 0) {
-                ImGui::Columns(6, "mycolumns");
+                ImGui::Columns(5, "mycolumns");
                 ImGui::Separator();
                 ImGui::Text("ID"); ImGui::NextColumn();
                 ImGui::Text("Name"); ImGui::NextColumn();
                 ImGui::Text("Prefix"); ImGui::NextColumn();
                 ImGui::Text("Started"); ImGui::NextColumn();
-                ImGui::Text("Start"); ImGui::NextColumn();
-                ImGui::Text("Stop"); ImGui::NextColumn();
+                ImGui::Text("Open"); ImGui::NextColumn();
                 ImGui::Separator();
                 for (size_t n = 0; n < iocs->count(); n++) {
                     ImGui::PushID(n);
@@ -227,79 +225,17 @@ int main(int, char**)
                     ImGui::Text("%s", ioc->deviceName); ImGui::NextColumn();
                     ImGui::Text("%s", ioc->prefix); ImGui::NextColumn();
                     ImGui::Text("%d", ioc->started); ImGui::NextColumn();
-                    if (ImGui::Button("Start")) {
-                        ioc->wantStart = true;
+                    if (ImGui::Button("Open")) {
+                        ioc->open = true;
                     }
                     ImGui::NextColumn();
-                    if (ImGui::Button("Stop")) {
-                        ioc->wantStop = true;
+                    // show the IOC control window
+                    if (ioc->open) {
+                        ioc->show(&ioc->open);
                     }
-                    ImGui::NextColumn();
-
-                    // if IOC is started show console
-//                    if (ioc->consoleStatus) {
-//                        char consoleName[128] = {0};
-//                        sprintf(consoleName, "Console: %s", ioc->deviceName);
-//                        ioc->console.Draw(consoleName, &ioc->consoleStatus);
-//                    }
-
                     ImGui::PopID();
                 }
                 ImGui::Columns(1);
-                ImGui::Separator();
-
-                for (size_t n = 0; n < iocs->count(); n++) {
-                    Ioc * ioc = iocs->ioc(n);
-                    if (ioc->wantStart) {
-                        ioc->wantStart = false;
-                        fprintf(stderr, "%s:%d starting IOC %s\n", __FUNCTION__, __LINE__, ioc->deviceName);
-                        ioc->start();
-//                        ioc->consoleStatus = true;
-                    } else if (ioc->wantStop) {
-                        ioc->wantStop = false;
-                        fprintf(stderr, "%s:%d stopping IOC %s\n", __FUNCTION__, __LINE__, ioc->deviceName);
-                        ioc->stop();
-//                        ioc->consoleStatus = false;
-                    }
-                    //ioc->console.Draw("Console", &ioc->consoleStatus);
-                }
-
-                ImGui::Separator();
-
-                // DEBUG
-                Ioc * ioc = iocs->ioc(0);
-
-                ioc->recvResponse();
-
-                // draw scrolling area for text output from child
-                // Reserve enough left-over height for 1 separator + 1 input text
-                const float footer_height_to_reserve = ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing();
-                ImGui::BeginChild("ScrollingRegion", ImVec2(0, -footer_height_to_reserve), false, ImGuiWindowFlags_HorizontalScrollbar);
-                if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
-                    ImGui::SetScrollHereY(1.0f);
-//                ImGui::TextUnformatted("dummy text..");
-                ImGui::TextUnformatted(ioc->recvBuffer);
-                ImGui::EndChild();
-                ImGui::Separator();
-
-                // input
-    //            bool reclaim_focus = false;
-    //            ImGuiInputTextFlags input_text_flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackCompletion | ImGuiInputTextFlags_CallbackHistory;
-    //            if (ImGui::InputText("Input", InputBuf, IM_ARRAYSIZE(InputBuf), input_text_flags, &TextEditCallbackStub, (void*)this))
-                ImGuiInputTextFlags input_text_flags = ImGuiInputTextFlags_EnterReturnsTrue;
-                if (ImGui::InputText("Input", InputBuf, IM_ARRAYSIZE(InputBuf), input_text_flags)) {
-//                    char* s = InputBuf;
-    //                Strtrim(s);
-    //                if (s[0])
-    //                    ExecCommand(s);
-//                    strcpy(s, "");
-    //                reclaim_focus = true;
-//                    fprintf(stderr, "%s:%d user entered: '%s'\n", __FUNCTION__, __LINE__, InputBuf);
-                    memcpy(ioc->sendBuffer, InputBuf, strlen(InputBuf));
-                    ioc->sendCommand(InputBuf);
-                    strcpy(InputBuf, "");
-                }
-
             } // iocs->count() > 0)
 
             ImGui::End();
@@ -316,8 +252,10 @@ int main(int, char**)
 
         glfwSwapBuffers(window);
     }
+
     fprintf(stderr, "out of loop, have %lu IOCs!\n", iocs->count());
     delete iocs;
+//    delete iocui0;
 
     // Cleanup
     ImGui_ImplOpenGL3_Shutdown();

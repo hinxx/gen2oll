@@ -220,8 +220,9 @@ int Ioc::start() {
     int pipe_stdin[2];
     int pipe_stdout[2];
 
+    fprintf(stderr, "%s:%d starting IOC %s\n", __FUNCTION__, __LINE__, deviceName);
     if (started) {
-        fprintf(stderr, "%s:%d child already started %d\n", __FUNCTION__, __LINE__, pid);
+        fprintf(stderr, "%s:%d IOC %s already started, PID %d\n", __FUNCTION__, __LINE__, deviceName, pid);
         return 0;
     }
     assert(pid == 0);
@@ -251,14 +252,14 @@ int Ioc::start() {
         prctl(PR_SET_PDEATHSIG, SIGTERM);
 
         errno = 0;
-        execl("/home/hinkokocevar/work/epicsbase/epics-base/bin/linux-x86_64/softIoc", "softIoc", (char*) NULL);
+        execl("./data/softIoc", "softIoc", (char*) NULL);
 
         // nothing below this line should be executed by child process
         // in case it is, execl() failed; lets exit
         fprintf(stderr, "%s:%d execl() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
         exit(1);
     }
-    fprintf(stderr, "%s:%d child PID %d started!\n", __FUNCTION__, __LINE__, p);
+    fprintf(stderr, "%s:%d IOC %s started, PID %d!\n", __FUNCTION__, __LINE__, deviceName, p);
 
     // the code below will be executed only by parent only
     // close unused pipe ends
@@ -277,12 +278,12 @@ int Ioc::start() {
 int Ioc::stop() {
 
     if (! started) {
-        fprintf(stderr, "%s:%d child not started %d\n", __FUNCTION__, __LINE__, pid);
+        fprintf(stderr, "%s:%d IOC %s not started\n", __FUNCTION__, __LINE__, deviceName);
         return 0;
     }
     assert(pid != 0);
+    fprintf(stderr, "%s:%d stopping IOC %s, PID %d\n", __FUNCTION__, __LINE__, deviceName, pid);
 
-    fprintf(stderr, "%s:%d killing child %d with SIGKILL\n", __FUNCTION__, __LINE__, pid);
     // send SIGKILL signal to the child process
     kill(pid, SIGKILL);
 
@@ -317,6 +318,7 @@ int Ioc::stop() {
     close(fromChild);
     fromChild = -1;
 
+    fprintf(stderr, "%s:%d IOC %s stopped\n", __FUNCTION__, __LINE__, deviceName);
     return 0;
 }
 
@@ -327,7 +329,6 @@ int Ioc::sendCommand(const char * _command) {
 
     write(toChild, _command, cmdSz);
     write(toChild, "\n", 1);
-    usleep(100);
 
     return 0;
 }
@@ -337,8 +338,7 @@ int Ioc::recvResponse(void) {
     struct pollfd fds;
     nfds_t nfds = 1;
     // timeout in milliseconds
-//    int timeout = 200;
-    int timeout = 2;
+    int timeout = 1;
 
     fds.fd = fromChild;
     fds.events = POLLIN;
@@ -351,111 +351,120 @@ int Ioc::recvResponse(void) {
         fprintf(stderr, "%s:%d poll() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
         return -1;
     } else if (n) {
-        fprintf(stderr, "%s:%d %d bytes available..\n", __FUNCTION__, __LINE__, n);
-        usleep(100);
-        n = read(fromChild, recvBuffer, 4095);
-        recvBuffer[n] = '\0';
-        recvSize = n;
-        recvNewData = true;
-        fprintf(stderr, "%s:%d RECV[%d]: \n'%s'\n", __FUNCTION__, __LINE__, n, recvBuffer);
+        fprintf(stderr, "%s:%d %d nonzero revents, recvOffset %ld ..\n", __FUNCTION__, __LINE__, n, recvOffset);
+        ssize_t nRecv = read(fromChild, recvBuffer + recvOffset, 4095);
+        recvBuffer[nRecv] = '\0';
+        recvSize = nRecv;
+        recvOffset += recvSize;
+        fprintf(stderr, "%s:%d nRecv %zd, recvSize %zu, recvOffset %ld, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
+                nRecv, recvSize, recvOffset, recvBuffer);
     } else {
 //        fprintf(stderr, "%s:%d timeout occured\n", __FUNCTION__, __LINE__);
-        recvNewData = false;
+//        recvNewData = false;
     }
 
     return 0;
 }
 
-#if 0
-int startChild(struct child * _child)
-{
-    pid_t pid = 0;
-    char buf[256];
-    char msg[256];
-    int status;
-    int pipe_stdin[2], pipe_stdout[2];
-
-    if(pipe(pipe_stdin)) return -1;
-    if(pipe(pipe_stdout)) return -1;
-
-    fprintf(stderr, "pipe_stdin[0] = %d, pipe_stdin[1] = %d\n", pipe_stdin[0], pipe_stdin[1]);
-    fprintf(stderr, "pipe_stdout[0] = %d, pipe_stdout[1] = %d\n", pipe_stdout[0], pipe_stdout[1]);
-
-    pid = fork();
-    if (pid == 0)
-    {
-        // Child
-        close(pipe_stdin[1]);
-        dup2(pipe_stdin[0], 0);
-        close(pipe_stdout[0]);
-        dup2(pipe_stdout[1], 1);
-
-        //ask kernel to deliver SIGTERM in case the parent dies
-        prctl(PR_SET_PDEATHSIG, SIGTERM);
-
-        //replace tee with your process
-        execl("/home/hinxx/work/fc/epics-base/bin/linux-x86_64/softIoc", "softIoc", (char*) NULL);
-        // Nothing below this line should be executed by child process. If so,
-        // it means that the execl function wasn't successfull, so lets exit:
-        exit(1);
+void Ioc::extractLines(void) {
+    char * s;
+    char * e;
+    char * eob;
+    char c;
+    s = recvBuffer;
+    e = recvBuffer;
+    eob = &recvBuffer[recvSize];
+    while (e < eob) {
+        if (*e == '\n') {
+            e++;
+            c = *e;
+            *e = '\0';
+            addLine(s);
+            *e = c;
+            s = e;
+        }
+        e++;
     }
-    // The code below will be executed only by parent. You can write and read
-    // from the child using pipefd descriptors, and you can send signals to
-    // the process using its pid by kill() function. If the child process will
-    // exit unexpectedly, the parent process will obtain SIGCHLD signal that
-    // can be handled (e.g. you can respawn the child process).
-
-    //close unused pipe ends
-    close(pipe_stdin[0]);
-    close(pipe_stdout[1]);
-
-
-    // Now, you can write to outpipefd[1] and read from inpipefd[0] :
-    printf("In the loop..\n");
-    while(1)
-    {
-        printf("Enter message to send\n");
-        fgets(msg, 256, stdin);
-        printf("\nYou entered: '%s'\n", msg);
-        if(strcmp(msg, "exit") == 0) break;
-
-        int n = strlen(msg);
-        msg[n] = '\n';
-        msg[n+1] = '\0';
-
-        n = strlen(msg);
-        printf("SEND[%d]: \n'%s'\n", n, msg);
-        write(pipe_stdin[1], msg, n);
-        usleep(100);
-
-        do {
-            struct pollfd fds;
-            nfds_t nfds = 1;
-            int timeout = 100;
-            fds.fd = pipe_stdout[0];
-            fds.events = POLLIN;
-            fds.revents = 0;
-            n = poll(&fds, nfds, timeout);
-            printf("poll() returned %d, revents %d\n", n, fds.revents);
-
-            if (n == -1) {
-                perror("poll()");
-            } else if (n) {
-                printf("Data is available now.\n");
-                usleep(100);
-                memset(buf, 0, 256);
-                n = read(pipe_stdout[0], buf, 256);
-                printf("RECV[%d]: \n'%s'\n", n, buf);
-            } else {
-                printf("Timeout occured.\n");
-            }
-        } while (n > 0);
-
-        printf("Another loop..\n");
-    }
-    printf("Out of the loop..\n");
-
-    kill(pid, SIGKILL); //send SIGKILL signal to the child process
-    waitpid(pid, &status, 0);
+    // XXX: fix handling of the remainder of the buffer
+    //      there is always text at the end of the buffer
+    //      NOT followed by '\n' : 'epics>'
+    recvSize = 0;
+    recvOffset = 0;
 }
-#endif
+
+void Ioc::draw(void) {
+    ImGui::Text("Buffer contents: %zu lines, %d bytes", lines, textBuf.size());
+    if (ImGui::Button("Clear")) {
+        clearBuffer();
+    }
+
+    // show IOC status
+    if (started) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
+        ImGui::Text("%s", "STARTED");
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+        ImGui::Text("%s", "STOPPED");
+        ImGui::PopStyleColor();
+    }
+    ImGui::SameLine();
+    // show IOC start / stop buttons
+    if (ImGui::Button("Start")) {
+        start();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Stop")) {
+        stop();
+    }
+    ImGui::SameLine();
+    ImGui::Checkbox("AutoScroll", &autoScroll);
+
+    // show command input text field
+    ImGui::Separator();
+    bool reclaim_focus = false;
+    ImGuiInputTextFlags input_text_flags = ImGuiInputTextFlags_EnterReturnsTrue;
+    if (ImGui::InputText("Input", sendBuffer, IM_ARRAYSIZE(sendBuffer), input_text_flags)) {
+        // send the command to the IOC shell
+        sendCommand(sendBuffer);
+        strcpy(sendBuffer, "");
+        // on command input, we scroll to bottom even if AutoScroll==false
+        scrollToBottom = true;
+        reclaim_focus = true;
+    }
+
+    // Auto-focus on window apparition
+    ImGui::SetItemDefaultFocus();
+    if (reclaim_focus) {
+        // Auto focus previous widget
+        ImGui::SetKeyboardFocusHere(-1);
+    }
+
+    // get read out IOC shell output
+    recvResponse();
+    if (recvSize) {
+        extractLines();
+    }
+
+    // show the IOC shell output/command response
+    ImGui::Separator();
+    ImGui::BeginChild("Log");
+    ImGui::TextUnformatted(textBuf.begin(), textBuf.end());
+    if (scrollToBottom || (autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())){
+        ImGui::SetScrollHereY(1.0f);
+    }
+    scrollToBottom = false;
+    ImGui::EndChild();
+}
+
+void Ioc::show(bool * _open) {
+    ImGui::SetNextWindowSize(ImVec2(520, 600), ImGuiCond_FirstUseEver);
+    if (! ImGui::Begin(deviceName, _open)) {
+        ImGui::End();
+        return;
+    }
+
+    draw();
+
+    ImGui::End();
+}

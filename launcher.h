@@ -3,6 +3,8 @@
 
 //#include "console.h"
 
+#include "imgui.h"
+
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
@@ -19,12 +21,15 @@ struct Ioc {
     int toChild;
     int fromChild;
     pid_t pid;
-//    Console console;
-//    bool consoleStatus;
     char sendBuffer[256];
     char recvBuffer[4096];
     size_t recvSize;
-    bool recvNewData = false;
+    off_t recvOffset;
+    bool open;
+    ImGuiTextBuffer textBuf;
+    bool autoScroll;
+    bool scrollToBottom;
+    size_t lines;
 
     Ioc(const char * _stagePath, const char * _instanceName, const char * _deviceName, const char * _prefix) {
         stagePath = strdup(_stagePath);
@@ -40,7 +45,11 @@ struct Ioc {
         sendBuffer[0] = 0;
         recvBuffer[0] = 0;
         recvSize = 0;
-        recvNewData = false;
+        recvOffset = 0;
+        autoScroll = true;
+        scrollToBottom = false;
+        clearBuffer();
+        open = false;
     }
     ~Ioc() {
         if (stagePath) { free(stagePath); }
@@ -55,6 +64,20 @@ struct Ioc {
     int stop();
     int sendCommand(const char * _command);
     int recvResponse(void);
+    void extractLines(void);
+
+    void clearBuffer(void) {
+        lines = 0;
+        textBuf.clear();
+    }
+
+    void addLine(const char * _line) {
+        textBuf.appendf("%s", _line);
+        lines++;
+    }
+
+    void draw(void);
+    void show(bool * _open);
 };
 
 struct IocList {
