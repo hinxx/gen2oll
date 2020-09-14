@@ -335,7 +335,9 @@ int Ioc::start() {
         prctl(PR_SET_PDEATHSIG, SIGTERM);
 
         errno = 0;
-        execl("./data/softIoc", "softIoc", (char*) NULL);
+        // fprintf(stderr, "%s:%d '%s %s %s %s %s %s'\n", __FUNCTION__, __LINE__,
+        //      "tools/start_ioc.sh", "start_ioc.sh", "dev", stagePath, instanceName, "0000");
+        execl("tools/start_ioc.sh", "start_ioc.sh", "dev", stagePath, instanceName, "0000", (char*) NULL);
 
         // nothing below this line should be executed by child process
         // in case it is, execl() failed; lets exit
