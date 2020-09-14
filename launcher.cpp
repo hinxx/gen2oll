@@ -29,7 +29,7 @@ void IocList::listDir(const char * _name, int _level) {
     DIR * dir;
     struct dirent * entry;
 
-    printf("%s:%d [%d] ENTER %s\n", __FUNCTION__, __LINE__,  _level, _name);
+    D("[%d] ENTER %s\n", _level, _name);
 
     if (!(dir = opendir(_name))) {
         return;
@@ -47,7 +47,7 @@ void IocList::listDir(const char * _name, int _level) {
 
             char path[1024];
             snprintf(path, sizeof(path), "%s/%s", _name, entry->d_name);
-            fprintf(stderr, "[%d] %*s[%s]\n", _level, _level, "", entry->d_name);
+            D0("[%d] %*s[%s]\n", _level, _level, "", entry->d_name);
 
             bool recurse = true;
             if (_level == 0) {
@@ -77,14 +77,14 @@ void IocList::listDir(const char * _name, int _level) {
             }
         } else {
             // this is a file
-            fprintf(stderr, "[%d] %*s- %s\n", _level, _level, "", entry->d_name);
+            D0("[%d] %*s- %s\n", _level, _level, "", entry->d_name);
 
             // we are only interested in a instance.cmd file at last level
             if (_level == 3) {
                 if (strncmp(entry->d_name, "instance.cmd", 12) == 0) {
                     bool ret = parseInstanceFile(_name, entry->d_name);
                     if (! ret) {
-                        fprintf(stderr, "%s:%d failed to add IOC from instance.cmd in path %s\n", __FUNCTION__, __LINE__, _name);
+                        E("failed to add IOC from instance.cmd in path %s\n", _name);
                     }
                 }
             }
@@ -92,7 +92,7 @@ void IocList::listDir(const char * _name, int _level) {
     }
 
     closedir(dir);
-    fprintf(stderr, "%s:%d [%d] LEAVE %s\n", __FUNCTION__, __LINE__, _level, _name);
+    D("[%d] LEAVE %s\n", _level, _name);
 }
 
 // extract value from lines like 'epicsEnvSet("LOCATION", "LAB")'
@@ -135,7 +135,7 @@ bool IocList::parseInstanceFile(const char * _path, const char *_name) {
     char * instanceName = basename(strdup1);
     char * stagePath = dirname(strdup2);
     stagePath = dirname(stagePath);
-    fprintf(stderr, "%s:%d GOT %s for %s in stage %s\n", __FUNCTION__, __LINE__, _name, instanceName, stagePath);
+    D("GOT %s for %s in stage %s\n", _name, instanceName, stagePath);
 
     size_t pathSz = strlen(_path) + strlen(_name) + 2;
     char * path = (char *)calloc(1, pathSz);
@@ -148,12 +148,12 @@ bool IocList::parseInstanceFile(const char * _path, const char *_name) {
 
     FILE *fp = fopen(path, "r");
     if (! fp) {
-        fprintf(stderr, "%s:%d fopen() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
+        E("fopen() failed %s\n", strerror(errno));
         free(path);
         return false;
     }
 
-    fprintf(stderr, "%s:%d processing file %s\n", __FUNCTION__, __LINE__, path);
+    D("processing file %s\n", path);
     char line[256];
     char * loc = NULL;
     char * dev = NULL;
@@ -167,20 +167,20 @@ bool IocList::parseInstanceFile(const char * _path, const char *_name) {
 
         if (strncmp(line, "epicsEnvSet(\"LOCATION\"", 22) == 0) {
             loc = parseInstanceLine(line);
-            fprintf(stderr, "%s:%d found LOCATION: '%s'\n", __FUNCTION__, __LINE__, loc);
+            D("found LOCATION: '%s'\n", loc);
         } else if (strncmp(line, "epicsEnvSet(\"DEVICE_NAME\"", 24) == 0) {
             dev = parseInstanceLine(line);
-            fprintf(stderr, "%s:%d found DEVICE_NAME: '%s'\n", __FUNCTION__, __LINE__, dev);
+            D("found DEVICE_NAME: '%s'\n", dev);
         } else if (strncmp(line, "epicsEnvSet(\"CAMERA_NAME\"", 24) == 0) {
             deviceName = parseInstanceLine(line);
-            fprintf(stderr, "%s:%d found CAMERA_NAME: '%s'\n", __FUNCTION__, __LINE__, deviceName);
+            D("found CAMERA_NAME: '%s'\n", deviceName);
         }
     }
     fclose(fp);
 
     // macro values might not be found for some reason
     if ((loc == NULL) || (dev == NULL) || (deviceName == NULL)) {
-        fprintf(stderr, "%s:%d skipping invalid %s file!\n", __FUNCTION__, __LINE__, path);
+        D("skipping invalid %s file!\n", path);
         if (loc) free(loc);
         if (dev) free(dev);
         if (deviceName) free(deviceName);
@@ -195,7 +195,7 @@ bool IocList::parseInstanceFile(const char * _path, const char *_name) {
     sprintf(prefix, "%s:%s:", loc, dev);
     // create a IOC object
     addIoc(new Ioc(stagePath, instanceName, deviceName, prefix));
-    fprintf(stderr, "%s:%d nr IOCs %ld\n", __FUNCTION__, __LINE__, count());
+    D("nr IOCs %ld\n", count());
 
     free(path);
     free(loc);
@@ -210,19 +210,19 @@ bool IocList::parseInstanceFile(const char * _path, const char *_name) {
 
 size_t IocList::populate(void) {
     if (strlen(topPath) == 0) {
-        fprintf(stderr, "%s:%d empty top path\n", __FUNCTION__, __LINE__);
+        E("empty top path\n");
         return 0;
     }
 
-    fprintf(stderr, "%s:%d using top path %s\n", __FUNCTION__, __LINE__, topPath);
+    D("using top path %s\n", topPath);
     listDir(topPath, 0);
-    fprintf(stderr, "%s:%d found %ld IOCs\n", __FUNCTION__, __LINE__, count());
+    D("found %ld IOCs\n", count());
 
     return count();
 }
 
 void IocList::clear() {
-    fprintf(stderr, "%s:%d have %ld IOCs\n", __FUNCTION__, __LINE__, count());
+    D("have %ld IOCs\n", count());
     for (size_t n = 0; n < count(); n++) {
         delete list[n];
     }
@@ -255,8 +255,8 @@ void ChildData::extractLines(void) {
         memmove(&buffer[0], &buffer[from], rem);
         size = rem;
         buffer[size] = '\0';
-        fprintf(stderr, "%s:%d %s moved %zu bytes from %zu to start, size %ld: \n'%s'\n", __FUNCTION__, __LINE__,
-                name, rem, from, size, buffer);
+        D("%s moved %zu bytes from %zu to start, size %ld: \n'%s'\n",
+          name, rem, from, size, buffer);
     } else {
         // nothing left
         size = 0;
@@ -276,30 +276,31 @@ int ChildData::recvResponse(void) {
 
     int n = poll(&fds, nfds, timeout);
     if (n == -1) {
-        fprintf(stderr, "%s:%d poll() %s failed %s\n", __FUNCTION__, __LINE__, name, strerror(errno));
+        E("poll() %s failed %s\n", name, strerror(errno));
     } else if (n) {
-        fprintf(stderr, "%s:%d %s revents %d ..\n", __FUNCTION__, __LINE__, name, fds.revents);
+        D("%s revents %d ..\n", name, fds.revents);
         if (fds.revents & POLLHUP) {
             // remote end has closed the connection (exit issued?)
             errno = EPIPE;
+            E("**** IOC not responding ***");
             addLine("**** IOC not responding ***");
             // return error
             n = -1;
         } else if (fds.revents & POLLIN) {
-            fprintf(stderr, "%s:%d %s size %zu ..\n", __FUNCTION__, __LINE__, name, size);
+            D("%s size %zu ..\n", name, size);
             n = read(fd, buffer + size, 4095 - size);
             size += n;
             buffer[size] = '\0';
-            fprintf(stderr, "%s:%d %s nRecv %d size %zu, RECV: \n'%s'\n", __FUNCTION__, __LINE__,
+            D("%s nRecv %d size %zu, RECV: \n'%s'\n",
                     name, n, size, buffer);
             extractLines();
             // return number of bytes available in buffer
             n = size;
         } else {
-            fprintf(stderr, "%s:%d %s UNHANDLED revents %d ..\n", __FUNCTION__, __LINE__, name, fds.revents);
+            E("%s UNHANDLED revents %d ..\n", name, fds.revents);
         }
     } else {
-        // fprintf(stderr, "%s:%d timeout occured\n", __FUNCTION__, __LINE__);
+        // D("timeout occured\n");
     }
 
     return n;
@@ -314,9 +315,9 @@ int Ioc::start() {
     int pipe_stdout[2];
     int pipe_stderr[2];
 
-    fprintf(stderr, "%s:%d starting IOC %s\n", __FUNCTION__, __LINE__, deviceName);
+    D("starting IOC %s\n", deviceName);
     if (started) {
-        fprintf(stderr, "%s:%d IOC %s already started, PID %d\n", __FUNCTION__, __LINE__, deviceName, pid);
+        D("IOC %s already started, PID %d\n", deviceName, pid);
         return 0;
     }
     assert(pid == 0);
@@ -325,19 +326,19 @@ int Ioc::start() {
     assert(childStderr.fd == -1);
 
     if (pipe(pipe_stdin)) {
-        fprintf(stderr, "%s:%d pipe() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
+        E("pipe() failed %s\n", strerror(errno));
         return -1;
     }
     if (pipe(pipe_stdout)) {
-        fprintf(stderr, "%s:%d pipe() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
+        E("pipe() failed %s\n", strerror(errno));
         return -1;
     }
     if (pipe(pipe_stderr)) {
-        fprintf(stderr, "%s:%d pipe() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
+        E("pipe() failed %s\n", strerror(errno));
         return -1;
     }
-    fprintf(stderr, "%s:%d IO pipe FDs pipe_stdin %d, %d pipe_stdout %d, %d pipe_stderr %d, %d\n",
-            __FUNCTION__, __LINE__, pipe_stdin[0], pipe_stdin[1], pipe_stdout[0], pipe_stdout[1], pipe_stderr[0], pipe_stderr[1]);
+    D("IO pipe FDs pipe_stdin %d, %d pipe_stdout %d, %d pipe_stderr %d, %d\n",
+      pipe_stdin[0], pipe_stdin[1], pipe_stdout[0], pipe_stdout[1], pipe_stderr[0], pipe_stderr[1]);
 
     pid_t p = fork();
     if (p == 0) {
@@ -353,16 +354,16 @@ int Ioc::start() {
         prctl(PR_SET_PDEATHSIG, SIGTERM);
 
         errno = 0;
-        // fprintf(stderr, "%s:%d '%s %s %s %s %s %s'\n", __FUNCTION__, __LINE__,
-        //      "tools/start_ioc.sh", "start_ioc.sh", "dev", stagePath, instanceName, "0000");
+        D("'%s %s %s %s %s %s'\n",
+              "tools/start_ioc.sh", "start_ioc.sh", "dev", stagePath, instanceName, "0000");
         execl("tools/start_ioc.sh", "start_ioc.sh", "dev", stagePath, instanceName, "0000", (char*) NULL);
 
         // nothing below this line should be executed by child process
         // in case it is, execl() failed; lets exit
-        fprintf(stderr, "%s:%d execl() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
+        E("execl() failed %s\n", strerror(errno));
         exit(1);
     }
-    fprintf(stderr, "%s:%d IOC %s started, PID %d!\n", __FUNCTION__, __LINE__, deviceName, p);
+    D("IOC %s started, PID %d!\n", deviceName, p);
 
     // the code below will be executed only by parent only
     // close unused pipe ends
@@ -385,11 +386,11 @@ int Ioc::start() {
 int Ioc::stop() {
 
     if (! started) {
-        fprintf(stderr, "%s:%d IOC %s not started\n", __FUNCTION__, __LINE__, deviceName);
+        D("IOC %s not started\n", deviceName);
         return 0;
     }
     assert(pid != 0);
-    fprintf(stderr, "%s:%d stopping IOC %s, PID %d\n", __FUNCTION__, __LINE__, deviceName, pid);
+    D("stopping IOC %s, PID %d\n", deviceName, pid);
 
     // send SIGKILL signal to the child process
     kill(pid, SIGKILL);
@@ -398,23 +399,21 @@ int Ioc::stop() {
     int status = 0;
     int ret = waitpid(pid, &status, 0);
     if (ret < 0) {
-        fprintf(stderr, "%s:%d waitpid() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
+        E("waitpid() failed %s\n", strerror(errno));
         return -1;
     }
-    fprintf(stderr, "%s:%d waitpid() returned %d\n", __FUNCTION__, __LINE__, ret);
+    D("waitpid() returned %d\n", ret);
     if (ret == 0) {
-        fprintf(stderr, "%s:%d no child state change?!\n", __FUNCTION__, __LINE__);
+        E("no child state change?!\n");
         return -1;
     }
 
     // child is gone..
     if (status > 0) {
         if (WIFEXITED(status)) {
-            fprintf(stderr, "%s:%d child %d terminated normally, status %d\n",
-                    __FUNCTION__, __LINE__, pid, WEXITSTATUS(status));
+            D("child %d terminated normally, status %d\n", pid, WEXITSTATUS(status));
         } else if (WIFSIGNALED(status)) {
-            fprintf(stderr, "%s:%d child %d terminated by a signal %d\n",
-                    __FUNCTION__, __LINE__, pid, WTERMSIG(status));
+            D("child %d terminated by a signal %d\n", pid, WTERMSIG(status));
         }
     }
 
@@ -427,14 +426,13 @@ int Ioc::stop() {
     close(childStderr.fd);
     childStderr.fd = -1;
 
-    fprintf(stderr, "%s:%d IOC %s stopped\n", __FUNCTION__, __LINE__, deviceName);
+    D("IOC %s stopped\n", deviceName);
     return 0;
 }
 
 int Ioc::sendCommand(const char * _command) {
     size_t cmdSz = strlen(_command);
-    fprintf(stderr, "%s:%d new command for child [%zu]] '%s'\n",
-            __FUNCTION__, __LINE__, cmdSz, _command);
+    D("new command for child [%zu]] '%s'\n", cmdSz, _command);
 
     write(childStdin, _command, cmdSz);
     write(childStdin, "\n", 1);
@@ -449,7 +447,7 @@ int Ioc::recvResponse(void) {
     ret |= childStderr.recvResponse();
     ret |= childStdout.recvResponse();
     if (ret == -1) {
-        fprintf(stderr, "%s:%d poll()/read() failed %s\n", __FUNCTION__, __LINE__, strerror(errno));
+        E("poll()/read() failed %s\n", strerror(errno));
     }
 
     return ret;
@@ -567,7 +565,7 @@ void Ioc::show(bool * _open) {
 IocList *  launcherInitialize(void) {
     IocList * iocs = new IocList();
     IM_ASSERT(iocs != NULL);
-    fprintf(stderr, "starting loop!\n");
+    D("starting loop!\n");
     return iocs;
 }
 
@@ -622,7 +620,7 @@ void launcherDraw(IocList * _iocs) {
 }
 
 void launcherDestroy(IocList * _iocs) {
-    fprintf(stderr, "out of the loop\n");
+    D("out of the loop\n");
     if (_iocs) {
         delete _iocs;
     }

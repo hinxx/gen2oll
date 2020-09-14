@@ -24,6 +24,10 @@ UNAME_S := $(shell uname -s)
 
 CXXFLAGS = -I./imgui -I.
 CXXFLAGS += -g -Wall -Wformat
+ifdef DEBUG
+CXXFLAGS += -DDEBUG
+endif
+
 LIBS =
 
 ##---------------------------------------------------------------------

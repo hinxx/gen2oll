@@ -8,6 +8,16 @@
 #include <stdlib.h>
 #include <vector>
 
+// some handy macros for printing to stderr
+#define E(fmt, ...)         do { fprintf(stderr, "%s:%d ** ERROR ** " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__); } while (0)
+#ifdef DEBUG
+    #define D0(fmt, ...)        do { fprintf(stderr, fmt, ##__VA_ARGS__); } while (0)
+    #define D(fmt, ...)         do { fprintf(stderr, "%s:%d " fmt, __FUNCTION__, __LINE__, ##__VA_ARGS__); } while (0)
+#else
+    #define D0(fmt, ...)        do{}while(0)
+    #define D(fmt, ...)         do{}while(0)
+#endif
+
 struct ChildData {
     char name[16];
     int fd;
