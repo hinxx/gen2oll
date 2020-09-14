@@ -545,3 +545,67 @@ void Ioc::show(bool * _open) {
 
     ImGui::End();
 }
+
+IocList *  launcherInitialize(void) {
+    IocList * iocs = new IocList();
+    IM_ASSERT(iocs != NULL);
+    fprintf(stderr, "starting loop!\n");
+    return iocs;
+}
+
+void launcherDraw(IocList * _iocs) {
+    IM_ASSERT(_iocs != NULL);
+
+    ImGui::Begin("Main Window");
+
+    // set the top IOC path
+    if (strlen(_iocs->topPath) == 0) {
+        strncpy(_iocs->topPath, "/data/bdee", 512);
+    }
+    ImGui::InputText("IOCs location", _iocs->topPath, IM_ARRAYSIZE(_iocs->topPath));
+
+    if (ImGui::Button("Scan for IOCs")) {
+        // removes all the IOC objects
+        // XXX what happens to the ones that are started?
+        _iocs->clear();
+        _iocs->populate(_iocs->topPath);
+    }
+
+    if (_iocs->count() > 0) {
+        ImGui::Columns(5, "mycolumns");
+        ImGui::Separator();
+        ImGui::Text("ID"); ImGui::NextColumn();
+        ImGui::Text("Name"); ImGui::NextColumn();
+        ImGui::Text("Prefix"); ImGui::NextColumn();
+        ImGui::Text("Started"); ImGui::NextColumn();
+        ImGui::Text("Open"); ImGui::NextColumn();
+        ImGui::Separator();
+        for (size_t n = 0; n < _iocs->count(); n++) {
+            ImGui::PushID(n);
+            ImGui::Text("%04ld", n); ImGui::NextColumn();
+            Ioc * ioc = _iocs->ioc(n);
+            ImGui::Text("%s", ioc->deviceName); ImGui::NextColumn();
+            ImGui::Text("%s", ioc->prefix); ImGui::NextColumn();
+            ImGui::Text("%s", ioc->started ? "YES" : "NO"); ImGui::NextColumn();
+            if (ImGui::Button("Open")) {
+                ioc->open = true;
+            }
+            ImGui::NextColumn();
+            // show the IOC control window
+            if (ioc->open) {
+                ioc->show(&ioc->open);
+            }
+            ImGui::PopID();
+        }
+        ImGui::Columns(1);
+    } // iocs->count() > 0)
+
+    ImGui::End();
+}
+
+void launcherDestroy(IocList * _iocs) {
+    fprintf(stderr, "out of the loop\n");
+    if (_iocs) {
+        delete _iocs;
+    }
+}

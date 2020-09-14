@@ -137,13 +137,12 @@ int main(int, char**)
     //IM_ASSERT(font != NULL);
 
     // Our state
-    bool show_demo_window = true;
+    bool show_demo_window = false;
     bool show_another_window = false;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
-    IocList * iocs = new IocList();
-
-    fprintf(stderr, "starting loop!\n");
+    // initialize our app
+    IocList * iocs = launcherInitialize();
 
     // Main loop
     while (!glfwWindowShouldClose(window))
@@ -165,7 +164,7 @@ int main(int, char**)
             ImGui::ShowDemoWindow(&show_demo_window);
 
         // 2. Show a simple window that we create ourselves. We use a Begin/End pair to created a named window.
-        {
+        if (show_demo_window) {
             static float f = 0.0f;
             static int counter = 0;
 
@@ -197,48 +196,9 @@ int main(int, char**)
             ImGui::End();
         }
 
+        // our app main window
         {
-            ImGui::Begin("Main Window");
-            ImGui::Text("Hello from launcher main window!");
-
-            if (ImGui::Button("Scan for IOCs")) {
-                // removes all the IOC objects
-                // XXX what happens to the ones that are started?
-                iocs->clear();
-                // do not hardcode; take this value from the input field or..
-                iocs->populate("./data/bdee");
-            }
-
-            if (iocs->count() > 0) {
-                ImGui::Columns(5, "mycolumns");
-                ImGui::Separator();
-                ImGui::Text("ID"); ImGui::NextColumn();
-                ImGui::Text("Name"); ImGui::NextColumn();
-                ImGui::Text("Prefix"); ImGui::NextColumn();
-                ImGui::Text("Started"); ImGui::NextColumn();
-                ImGui::Text("Open"); ImGui::NextColumn();
-                ImGui::Separator();
-                for (size_t n = 0; n < iocs->count(); n++) {
-                    ImGui::PushID(n);
-                    ImGui::Text("%04ld", n); ImGui::NextColumn();
-                    Ioc * ioc = iocs->ioc(n);
-                    ImGui::Text("%s", ioc->deviceName); ImGui::NextColumn();
-                    ImGui::Text("%s", ioc->prefix); ImGui::NextColumn();
-                    ImGui::Text("%s", ioc->started ? "YES" : "NO"); ImGui::NextColumn();
-                    if (ImGui::Button("Open")) {
-                        ioc->open = true;
-                    }
-                    ImGui::NextColumn();
-                    // show the IOC control window
-                    if (ioc->open) {
-                        ioc->show(&ioc->open);
-                    }
-                    ImGui::PopID();
-                }
-                ImGui::Columns(1);
-            } // iocs->count() > 0)
-
-            ImGui::End();
+            launcherDraw(iocs);
         }
 
         // Rendering
@@ -253,8 +213,8 @@ int main(int, char**)
         glfwSwapBuffers(window);
     }
 
-    fprintf(stderr, "out of loop, have %lu IOCs!\n", iocs->count());
-    delete iocs;
+    // destroy our app
+    launcherDestroy(iocs);
 
     // Cleanup
     ImGui_ImplOpenGL3_Shutdown();

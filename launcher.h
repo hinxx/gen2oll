@@ -97,14 +97,18 @@ struct Ioc {
 
 struct IocList {
     std::vector<Ioc *> list;
-    char * top;
+    char topPath[512];
 
     IocList() {
+        topPath[0] = '\0';
         clear();
     }
     ~IocList() {
         clear();
     }
+//    void setTop(const char * _topPath) {
+//        strncpy(topPath, _topPath, 512);
+//    }
     size_t populate(const char *_path);
     void clear();
     void listDir(const char * _name, int _level);
@@ -124,5 +128,9 @@ struct IocList {
         return NULL;
     }
 };
+
+IocList *launcherInitialize(void);
+void launcherDraw(IocList *_iocs);
+void launcherDestroy(IocList *_iocs);
 
 #endif // LAUNCHER_H
