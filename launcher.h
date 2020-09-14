@@ -106,10 +106,7 @@ struct IocList {
     ~IocList() {
         clear();
     }
-//    void setTop(const char * _topPath) {
-//        strncpy(topPath, _topPath, 512);
-//    }
-    size_t populate(const char *_path);
+    size_t populate(void);
     void clear();
     void listDir(const char * _name, int _level);
     bool parseInstanceFile(const char *_path, const char * _name);

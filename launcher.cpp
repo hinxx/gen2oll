@@ -153,6 +153,7 @@ bool IocList::parseInstanceFile(const char * _path, const char *_name) {
         return false;
     }
 
+    fprintf(stderr, "%s:%d processing file %s\n", __FUNCTION__, __LINE__, path);
     char line[256];
     char * loc = NULL;
     char * dev = NULL;
@@ -177,6 +178,18 @@ bool IocList::parseInstanceFile(const char * _path, const char *_name) {
     }
     fclose(fp);
 
+    // macro values might not be found for some reason
+    if ((loc == NULL) || (dev == NULL) || (deviceName == NULL)) {
+        fprintf(stderr, "%s:%d skipping invalid %s file!\n", __FUNCTION__, __LINE__, path);
+        if (loc) free(loc);
+        if (dev) free(dev);
+        if (deviceName) free(deviceName);
+        free(path);
+        free(strdup1);
+        free(strdup2);
+        return false;
+    }
+
     size_t prefixSz = strlen(loc) + strlen(dev) + 3;
     char * prefix = (char *)calloc(1, prefixSz);
     sprintf(prefix, "%s:%s:", loc, dev);
@@ -195,9 +208,14 @@ bool IocList::parseInstanceFile(const char * _path, const char *_name) {
     return true;
 }
 
-size_t IocList::populate(const char *_path) {
-    fprintf(stderr, "%s:%d supplied top path %s\n", __FUNCTION__, __LINE__, _path);
-    listDir(_path, 0);
+size_t IocList::populate(void) {
+    if (strlen(topPath) == 0) {
+        fprintf(stderr, "%s:%d empty top path\n", __FUNCTION__, __LINE__);
+        return 0;
+    }
+
+    fprintf(stderr, "%s:%d using top path %s\n", __FUNCTION__, __LINE__, topPath);
+    listDir(topPath, 0);
     fprintf(stderr, "%s:%d found %ld IOCs\n", __FUNCTION__, __LINE__, count());
 
     return count();
@@ -568,7 +586,7 @@ void launcherDraw(IocList * _iocs) {
         // removes all the IOC objects
         // XXX what happens to the ones that are started?
         _iocs->clear();
-        _iocs->populate(_iocs->topPath);
+        _iocs->populate();
     }
 
     if (_iocs->count() > 0) {
